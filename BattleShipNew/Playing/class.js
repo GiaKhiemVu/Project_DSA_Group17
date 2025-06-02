@@ -201,6 +201,7 @@ export class Computer{
         this.playerTable = playerBoard;
         this.computerTable = comBoard;
         this.currentShip = 0;
+        this.shipDirectionTracking = null;
     }
 
     placingShip(){
@@ -221,109 +222,85 @@ export class Computer{
         }
     }
 
-    attack(){
-        if(this.attackArray.length === 0){
+    attack() {
+        console.log("[Attack] Starting attack...");
+        if (this.attackArray.length === 0) {
+            console.log("[Attack] No target in queue → Random attack");
             this.randomAttack();
         } else {
+            console.log("[Attack] Target in queue → Tracking attack");
             this.trackingAttack();
         }
-        console.log("---------------------------------------");
     }
 
-    randomAttack(){
+    randomAttack() {
+        console.log("[RandomAttack] Searching for a valid random position...");
         let pos = this.randomPos();
-        while(!this.checkValidPos(pos)){
+        while (!this.checkValidPos(pos)) {
             pos = this.randomPos();
         }
 
-        if(this.playerTable.table[pos.x][pos.y] === 1){
-            this.attackArray.enqueue(...[pos]);
-            pos.value = 1;
+        pos.value = this.playerTable.table[pos.getX()][pos.getY()];
+        console.log(`[RandomAttack] Targeted Position (${pos.getX()}, ${pos.getY()}) → Value: ${pos.value}`);
+
+        if (pos.value === 1) {
+            console.log("[RandomAttack] Hit! Adding to tracking queue.");
+            this.attackArray.enqueue(pos);
         }
 
         this.syncPlayerShipArray(pos);
         this.playerTable.computerAttacked(pos);
-        console.log("randomAttack", pos);
     }
 
-    trackingAttack(){
-        if(this.trackingDir.length === 0){
-            this.currentPos = this.createNewPosWithDir(this.attackArray.peek(), this.randomDirection());
-            this.syncPlayerShipArray(this.currentPos);
-            this.playerTable.computerAttacked(this.currentPos);
-            this.trackingDir.push(this.currentPos.direction);
-        } else {
-            let currentDirection = this.currentPos.direction;
+    trackingAttack() {
+        const root = this.attackArray.peek();
+        console.log(`[TrackingAttack] Root position: (${root.getX()}, ${root.getY()})`);
 
-            if(this.currentPos.value === 1){
-                this.currentPos = this.createNewPosWithDir(...[this.currentPos], this.currentPos.direction);
-                this.syncPlayerShipArray(this.currentPos);
-                this.playerTable.computerAttacked(this.currentPos);
-            } else if(this.currentPos.value === 0){
-                if(!this.trackingDir.some(dirs => currentDirection === dirs)){
-                    this.trackingDir.push(currentDirection);
-                    console.log(this.trackingDir);
-                }
-                
-                console.log(this.trackingDir.length);
-                if(this.trackingDir.length === 4){
-                    this.trackingDir = [];
-                    this.attackArray.dequeue();
-                    if(this.attackArray.length === 0){
-                        this.attack();
-                    }
-                }
-
-                let direction = this.randomDirection();
-                
-                while(this.trackingDir.some(dirs => direction === dirs)){
-                    direction = this.randomDirection();
-                }
-                
-                this.currentPos = this.createNewPosWithDir(this.attackArray.peek() , direction);
-                
-                while(!this.checkValidPos(this.currentPos)){
-                    while(this.trackingDir.some(dirs => direction === dirs)){
-                        direction = this.randomDirection();
-                    }
-
-                    this.currentPos = this.createNewPosWithDir(this.attackArray.peek() , direction);
-                
-                    
-                    if(!this.checkValidPos(this.currentPos)){
-                        if(!this.trackingDir.some(dirs => this.currentPos.direction === dirs)){
-                            this.trackingDir.push(this.currentPos.direction);
-                        }
-                    }
-
-                    if(this.trackingDir.length === 4){
-                        this.attack();
-                    }
-                }
-                this.syncPlayerShipArray(this.currentPos);
-                this.playerTable.computerAttacked(this.currentPos);
-            } else {
-                console.log(this.trackingDir);
-
-                if(!this.trackingDir.some(dirs => this.currentPos.direction === dirs)){
-                    this.trackingDir.push(this.currentPos.direction);
-                }
-
-                if(this.trackingDir.length <= 4){
-                    this.trackingDir = [];
-                    this.attackArray.dequeue();
-                    console.log("reset tracking dir",this.trackingDir);
-                }
-
-                while(this.trackingDir.some(dirs => this.currentPos.direction === dirs)){
-                    this.currentPos.direction = this.randomDirection();
-                }
-
-                this.attack();
-            }
+        if (this.trackingDir.length === 4) {
+            console.log("[TrackingAttack] All 4 directions tried. Resetting state.");
+            this.attackArray.dequeue();
+            this.trackingDir = [];
+            this.shipDirectionTracking = null;
+            this.attack();
+            return;
         }
 
-        console.log(this.currentPos);
+        let direction = this.randomDirection();
+        while (this.trackingDir.includes(direction)) {
+            direction = this.randomDirection();
+        }
+        console.log(`[TrackingAttack] Trying new direction: ${direction}`);
+
+        let newPos = this.createNewPosWithDir(root, direction);
+
+        if (!this.checkValidPos(newPos)) {
+            console.log(`[TrackingAttack] Invalid position in direction ${direction}. Marking as tried.`);
+            this.trackingDir.push(direction);
+            this.trackingAttack();
+            return;
+        }
+
+        console.log(`[TrackingAttack] Attacking Position (${newPos.getX()}, ${newPos.getY()}) → Value: ${newPos.value}`);
+        this.syncPlayerShipArray(newPos);
+        this.playerTable.computerAttacked(newPos);
+
+        if (newPos.value === 1) {
+            console.log("[TrackingAttack] Hit detected.");
+            if (!this.shipDirectionTracking) {
+                this.shipDirectionTracking = ["left", "right"].includes(direction) ? "horizontal" : "vertical";
+                console.log(`[TrackingAttack] Direction tracking set to: ${this.shipDirectionTracking}`);
+            } else {
+                const newDirType = ["left", "right"].includes(direction) ? "horizontal" : "vertical";
+                if (newDirType !== this.shipDirectionTracking) {
+                    console.log("[TrackingAttack] Hit in different direction → Adding to queue.");
+                    this.attackArray.enqueue(newPos);
+                }
+            }
+            this.currentPos = newPos;
+        } else {
+            console.log(`[TrackingAttack] Miss. Direction ${direction} added to tried list.`);
+            this.trackingDir.push(direction);
+        }
     }
 
     randomPos(){
